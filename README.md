@@ -35,17 +35,17 @@ bounds:
 | Subset by leading hex digit | Searched through | Equivalent upper bound |
 |---|---|---|
 | 1 or 3 | 64 hex digits | 2^256, about 1.2e77 |
-| 5, 7, 9 or F | 45 hex digits | 2^180, about 1.5e54 |
+| 5, 7, 9 or F | 46 hex digits | 2^184, about 2.5e55 |
 
 Other leading digits cannot occur: even digits end in a zero bit, and B and D
 fail the case analysis (see Method). Together the two rows cover every integer
-below 2^180, and the first row alone covers its subset to 2^256.
+below 2^184, and the first row alone covers its subset to 2^256.
 
 Prior art: Regan's 2010 search covered the 1 or 3 subset through 64 hex digits
 and the 5, 7, 9, F subset through 32 hex digits. This work confirms both bounds
 independently with a different construction and extends the second from 32 to
-45 hex digits: lengths 33 to 38 on a 16-core CPU, lengths 39 to 45 on one
-RTX 4090. The new ground is about 1.2e14 candidates.
+46 hex digits: lengths 33 to 38 on a 16-core CPU, lengths 39 to 46 on one
+RTX 4090. The new ground is about 1.9e14 candidates.
 
 Timings, counts and the exact commands are in [docs/RESULTS.md](docs/RESULTS.md).
 

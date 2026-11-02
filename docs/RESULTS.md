@@ -19,16 +19,20 @@ the range includes them; no other hit occurred in any run.
 | tripal_wide | 39 to 64 hex digits, leading digits 1 and 3 only | 17,177,772,032 | 0 | 11.1 s |
 | tripal_cuda (RTX 4090) | 1 to 32 hex digits | 11,453,508,260 | 0 | 0.2 s |
 | tripal_cuda (RTX 4090) | 39 to 45 hex digits | 116,548,705,976,320 | 0 | 1,599.6 s |
+| tripal_cuda (RTX 4090) | 46 hex digits | 70,368,752,566,272 | 0 | 960.4 s |
 
-Combined: every integer below 2^180 (45 hex digits, about 1.5e54) is covered,
+Combined: every integer below 2^184 (46 hex digits, about 2.5e55) is covered,
 and the leading-digit 1 and 3 subsets are covered to 2^256.
 
 The GPU run for 39 to 45 was one invocation of `bin/tripal_cuda 39 46`; it
 completed every group through hex length 45 and then stopped at the first
-length-46 group because a launch chunk overflowed the survivor buffer, which
-the program treats as a fatal error rather than dropping candidates. The
-per-group lines in its log give the counts above. Length 46 is being rerun with
-the chunk-splitting fix.
+length-46 group because a launch chunk overflowed the survivor buffer, which the
+program treated as a fatal error rather than dropping candidates. The per-group
+lines in its log give the counts above. Length 46 was then run separately with
+the chunk-splitting fallback, which split one dense pocket of fall-through
+candidates 14 times before every piece fit; the host verified 62,754,676
+survivors for that length, of which 105,145 had genuinely mirrored nine-digit
+ends and none was a full palindrome.
 
 ## Candidate counts by group
 
@@ -62,7 +66,7 @@ measurement: 549,756,862,464 candidates in 688.8 s.
 
 tripal_cuda processes about 7e10 candidates per second on the RTX 4090, roughly
 90 times the CPU program. Per hex length in the 39 to 45 run, both large groups
-together: 39 in 15.2 s, 41 in 60.5 s, 43 in 239.7 s, 45 in 969.4 s.
+together: 39 in 15.2 s, 41 in 60.5 s, 43 in 239.7 s, 45 in 969.4 s, 46 in 960.4 s.
 
 Survivor counts per group in the GPU run vary by two orders of magnitude (3,331
 to 7,446,010) because fall-through candidates share leading-bit prefixes and are
@@ -90,7 +94,6 @@ measured rates on this machine:
 
 | Hex length | Candidates | 16-core CPU | RTX 4090 |
 |---|---|---|---|
-| 46 | 2^46 | 1 day | 17 min |
 | 47 and 48 | 2^48 | 4 days | 70 min |
 | 49 and 50 | 2^50 | 16 days | 4.5 h |
 | 51 and 52 | 2^52 | 2 months | 18 h |
