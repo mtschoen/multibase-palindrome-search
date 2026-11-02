@@ -83,13 +83,63 @@ decimal digits have no middle digits between the first and last nine, so the
 rounding test passes them all to the host, and large groups pass about 6 in
 10 million.
 
-## What was not verified, or is weaker
+## GPU counter regression
+
+The original GPU survivor counter was 32 bits while one launch could visit
+`2^38` candidates. In `all` mode, a group with `2^33` survivors would wrap the
+counter to zero and bypass the overflow check. Host-side visited accounting
+could still report the planned range. The small `all 1 20` comparison did not
+reach this boundary.
+
+The counter, atomic slot, device allocation/readback and host group totals now
+use 64 bits. A launch has at most `2^38` survivors, so this counter cannot wrap.
+The regression initializes the actual kernel counter to `2^32 - 4`, processes
+eight survivors, and requires `2^32 + 4` with an untouched four-entry buffer.
+The old code returned 4 and overwrote the sentinels. A second check compares
+all 32 candidates of a small group with independent numeric enumeration at
+buffer capacities 32 and 3; the latter forces repeated production-path splits.
+Compute Sanitizer reported zero memory errors. Fresh large-run results are in
+[RESULTS.md](RESULTS.md).
+
+## Exact pruning proof and independent checks
+
+The four complete binary/hex families are ordinary hex palindromes over
+`{0,1}`, `{0,3}`, `{0,2,5,7}`, and `{0,6,9,F}`, with endpoints respectively
+`1`, `3`, `5/7`, and `9/F`. For `m = ceil(L/2)`, their sizes are
+`2^(m-1)`, `2^(m-1)`, `2^(2m-1)`, and `2^(2m-1)`.
+
+For each independent hex position `j`, use weight
+`16^j + 16^(L-1-j)`, counting an odd center once. After assigning `d` outer
+positions, let `A` be their value and `U` the maximum completion. Positive
+weights make `[A,U]` an exact enclosing interval. Every unassigned weight is
+divisible by `16^d`, so every completion equals `A` modulo `2^(4d)`.
+
+If the endpoints have equal decimal length and share `k` leading digits, every
+integer between them shares that prefix. A decimal palindrome must therefore
+equal its reversed prefix modulo `10^k`, and hence modulo `2^k`. With `k` capped
+by `4d`, a mismatch with `A` proves that no completion can be a decimal
+palindrome. Decimal-length crossings pass conservatively. Disjoint rejected
+subtrees plus examined leaves account for every original assignment. This is
+an all-length argument for safe rejection; it does not establish nonexistence
+beyond ranges whose computation completed.
+
+Independent unrestricted hex-half enumeration followed by binary string
+reversal checks the Python candidate sets through eight hex digits. Tests also
+check partial intervals, odd centers, decimal-length boundaries and fixed-bit
+caps with actual decimal-palindrome witnesses. Native tests compare all
+accounting/node/leaf fields with Python and check decimal conversion against
+Python big integers, including `2^256 - 1`. The C representation uses five
+base-`10^19` chunks and a 79-byte decimal buffer. See the experiment notes for
+commands and the optional bucket predicate's separate conservatism argument.
+
+## Remaining limits
 
 - **No positive control.** No non-trivial hit exists to plant, so the full
   pipeline has never produced a hit beyond the single digits, which bypass the
   prefilter. The verify mode's end-digit check is the closest substitute.
-- **One machine, one compiler.** Everything ran on one x86-64 machine with
-  clang 22 and `-march=native`. The code uses `unsigned __int128`, inline
+- **One machine.** CPU enumeration used clang 22 and `-march=native`; the
+  GPU rerun used nvcc, and the exact searches used Python and clang. All ran
+  on the same x86-64 machine. The C code uses `unsigned __int128`, inline
   `divq` on x86-64, and compiler-rt division helpers. A reproduction with GCC,
   on ARM, or without `-march=native` would be valuable.
 - **Verify mode stops at 30 hex digits.** The incremental residue and prefilter
@@ -111,4 +161,6 @@ rounding test passes them all to the host, and large groups pass about 6 in
 ```
 make check                    # self-tests, pair-list agreement, verify mode to 24 hex digits
 bin/tripal_wide verify 1 30   # the full verify run reported above, about 16 s on 16 cores
+.\build_cuda.bat check       # GPU boundary and forced-splitting regressions on Windows
+python -B -m unittest experiments.test_exact_pruning experiments.test_exact_pruning_native
 ```

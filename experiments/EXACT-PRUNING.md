@@ -57,7 +57,10 @@ or unittest. On 2026-11-02, five test methods passed, with 96/96 search statemen
 covered (100%), no exclusions, zero Ruff findings, and successful compilation.
 No repository coverage or Python lint configuration existed, so this is scoped
 best-effort verification, not a claim about coverage of the existing C/CUDA code.
-The parent owns the full production suite and repository documentation review.
+The integrated suite now includes the optional bucket method: six Python test
+methods cover 131/131 search statements and 60/60 branches. Native comparison
+tests bring the combined suite to eleven methods. TEST-REPORT.md records the
+current checks; the five-method figures above describe the original baseline.
 
 The initial test run failed because the requested implementation module did not
 exist. Tests now compare unrestricted mirrored hexadecimal halves, filtered by

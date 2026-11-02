@@ -34,18 +34,26 @@ bounds:
 
 | Subset by leading hex digit | Searched through | Equivalent upper bound |
 |---|---|---|
-| 1 or 3 | 64 hex digits | 2^256, about 1.2e77 |
-| 5, 7, 9 or F | 46 hex digits | 2^184, about 2.5e55 |
+| 1, 3, 5 or 7 | 64 hex digits | 2^255, about 5.8e76 |
+| 9 or F | 63 hex digits | 2^252, about 7.2e75 |
 
 Other leading digits cannot occur: even digits end in a zero bit, and B and D
 fail the case analysis (see Method). Together the two rows cover every integer
-below 2^184, and the first row alone covers its subset to 2^256.
+below 2^255: every admissible 64-digit number below that threshold starts with
+1, 3, 5 or 7. The final 64-digit 9/F group hit the agreed time limit and is
+not claimed complete.
+
+The [2026-11-02 Astra-led audit](docs/AUDIT-2026-11-02.md) confirmed the orbit
+argument, repaired a GPU survivor-counter overflow, and introduced exact
+outside-in pruning. A fresh GPU run confirmed the original full bound of
+2^184; the native exact pruner extended it to 2^255. This is not a global
+nonexistence proof.
 
 Prior art: Regan's 2010 search covered the 1 or 3 subset through 64 hex digits
 and the 5, 7, 9, F subset through 32 hex digits. This work confirms both bounds
 independently with a different construction and extends the second from 32 to
-46 hex digits: lengths 33 to 38 on a 16-core CPU, lengths 39 to 46 on one
-RTX 4090. The new ground is about 1.9e14 candidates.
+46 hex digits by enumeration: lengths 33 to 38 on a 16-core CPU, lengths 39
+to 46 on one RTX 4090. The later exact-pruning bounds are listed above.
 
 Timings, counts and the exact commands are in [docs/RESULTS.md](docs/RESULTS.md).
 
@@ -82,7 +90,7 @@ with Regan's
 b = 1 gives leading digit 1, b = 2 gives 3, b = 3 gives 5 or 7, b = 4 gives 9
 or F.
 
-Four programs are included, in the order they were written:
+Five enumeration programs are included, in the order they were written:
 
 | Program | Approach | Range |
 |---|---|---|
@@ -102,18 +110,45 @@ second stage compares nine digits, taken as a double from the top 64 bits,
 against the last nine. Survivors go to the host for the exact check. On an
 RTX 4090 it covers the 128-bit range in 0.2 s, about 70 times the 16-core CPU.
 
+### Exact outside-in pruning
+
+The programs in `experiments/` avoid visiting every binary/hex candidate.
+They choose mirrored hexadecimal digits from the outside in, using the four
+allowed digit alphabets. Each partial assignment fixes low binary bits and an
+exact integer interval containing every completion. If both interval endpoints
+share a decimal prefix, every decimal-palindrome completion must have that
+prefix reversed as its suffix. A disagreement modulo `2^k`, where `k` is the
+number of prefix digits and no greater than the number of fixed low bits,
+rules out the entire branch. Surviving leaves get an exact decimal check.
+
+The Python reference uses arbitrary-precision integers; the native C version
+supports up to 64 hex digits with four 64-bit limbs. Neither uses floating point
+for pruning. Both record the assignments covered by rejected branches separately
+from the leaves actually examined. See [the exactness argument and Python
+experiment](experiments/EXACT-PRUNING.md) and [the native
+implementation](experiments/NATIVE-PRUNING.md).
+
+An optional [prefix-bucket variant](experiments/BUCKET-PRUNING.md) rejects more
+branches but was slower in the measured cases. The common-prefix method remains
+the default. No measured speedup is an asymptotic complexity theorem.
+
 ## Verification
 
 Each layer was checked against an independent implementation, and the chain is
 written up with its remaining weak points in
-[docs/VERIFICATION.md](docs/VERIFICATION.md). In brief: the orbit enumerator
-agrees with the mirror-half generator and with a Python string-reversal
-enumeration on every base 2 plus base 16 palindrome up to 20 hex digits (2.8
-million numbers); the decimal routines agree with string reversal on random
-numbers up to 77 digits; and a verify mode confirms the incremental residue
+[docs/VERIFICATION.md](docs/VERIFICATION.md). In brief: independent small-range
+enumerations and cross-program comparisons through 20 hex digits (2.8 million
+numbers) check the orbit generator; the decimal routines agree with string
+reversal on random numbers up to 77 digits; and a verify mode confirms the incremental residue
 against a direct computation on every one of 2.86 billion candidates up to 30
 hex digits while checking that the prefilter never rejects a candidate whose end
 digits genuinely mirror.
+
+The exact pruners have separate exhaustive small-range tests, decimal-boundary
+witnesses, and cross-language comparisons of every accounting field. A GPU
+regression crosses `2^32` in the real kernel, and forced small buffers exercise
+the production chunk-splitting loop. The latest checks and measured coverage are
+recorded in [TEST-REPORT.md](TEST-REPORT.md).
 
 The main weakness is that no positive control exists: there is no known
 non-trivial hit to plant, so the pipeline has never been seen to find one.
@@ -129,10 +164,11 @@ sh build.sh         # builds bin/tripal, bin/tripal_hex, bin/tripal128, bin/trip
 sh build.sh check   # self-tests, cross-program agreement, verify mode to 24 hex digits
 make check          # same, for environments with make (untested here; mirrors build.sh)
 build_cuda.bat      # Windows: builds bin\tripal_cuda.exe with nvcc, locating MSVC if needed
+.\build_cuda.bat check  # Windows PowerShell: build and run GPU counter/splitting regressions
 nvcc -O3 -arch=native -o bin/tripal_cuda src/tripal_cuda.cu    # elsewhere
 
 bin/tripal_wide 1 32                 # all of 128 bits, about 15 s on 16 cores
-bin/tripal_wide 39 39                # next unexplored hex length, about 23 min on 16 cores
+bin/tripal_wide 39 39                # one length by enumeration, about 23 min on 16 cores
 bin/tripal_wide 39 64 32 12          # leading digits 1 and 3 only, through 64 hex digits
 bin/tripal_wide pairs 1 6            # list every base 2 + base 16 palindrome up to 6 hex digits
 bin/tripal_wide verify 1 28          # assert residue and prefilter consistency per candidate
@@ -140,11 +176,19 @@ bin/tripal_wide verify 1 28          # assert residue and prefilter consistency 
 bin/tripal_cuda 39 40                # GPU search, about 20 s per hex length at this size on a 4090
 bin/tripal_cuda all 1 20             # every candidate, for comparison with tripal_wide pairs
 bin/tripal_cuda stage1 1 30          # stage-1 survivors, classified on the host against exact digits
+
+python -B experiments/exact_pruning.py 1 32
+python -B -m unittest experiments.test_exact_pruning experiments.test_exact_pruning_native
+clang -O3 -Wall -Wextra --rtlib=compiler-rt -o bin/exact_pruning_native.exe experiments/exact_pruning_native.c
+bin/exact_pruning_native.exe 1 56
 ```
 
 Each `done:` line reports hits, candidates visited and wall time. Candidates
-visited must equal candidates planned in the header line; a mismatch means a
-thread partition bug.
+visited must equal candidates planned in the header line; a mismatch invalidates
+the run. Equality is a consistency check, not an independent proof of coverage.
+For exact pruners, only completed groups count toward a bound. The Python
+`--budget-seconds` option reports an incomplete group and exits 1 on expiry;
+the native experiment needs an external process budget for expensive ranges.
 
 ## How to challenge this
 
@@ -164,11 +208,10 @@ Useful attacks, roughly in order of value:
 
 ## Where this could go
 
-[docs/ROADMAP.md](docs/ROADMAP.md) covers the cost of pushing the search
-further, a meet-in-the-middle idea that could change the exponent, and what a
-non-existence proof would have to overcome. The short version: a heuristic
-estimate puts the expected number of undiscovered solutions near 2^-38, so more
-searching will almost certainly find nothing, and only a proof can settle it.
+[docs/ROADMAP.md](docs/ROADMAP.md) covers improvements to exact pruning,
+meet-in-the-middle experiments, and what a nonexistence proof must add. The
+random-digit heuristic motivates expecting more empty searches, but is not a
+rigorous probability of existence. Only a global proof can settle nonexistence.
 
 ## References
 

@@ -1,117 +1,100 @@
 # Roadmap
 
-Three directions: push the brute-force bound, change the algorithm so the bound
-moves by more than a few hex digits, and think about a proof. Each section says
-what the obstacle is and what a contribution would look like.
+The 2026-11-02 Astra-led audit changed the practical next step: exact outside-in
+pruning is now implemented and substantially reduces the work. See
+[the audit narrative](AUDIT-2026-11-02.md), [results](RESULTS.md), and
+[the pruning proof](VERIFICATION.md#exact-pruning-proof-and-independent-checks).
+The problem remains open beyond the explicitly completed ranges.
 
-## 1. Push the bound with the current algorithm
+## 1. Improve the exact search before extending enumeration
 
-The work doubles per hex digit. On a 16-core desktop at 8e8 candidates per
-second, hex lengths 39 and 40 cost about 23 minutes each, 41 and 42 together
-about 1.5 hours, and 47 and 48 together about 4 days. The search is
-embarrassingly parallel: a work unit is (hex length, leading bits, index range),
-and `tripal_wide` already splits groups into contiguous index slices, so
-distributing across machines is a matter of handing out ranges and collecting
-`done:` lines.
+`experiments/exact_pruning.py` is the arbitrary-precision reference;
+`experiments/exact_pruning_native.c` implements the same common-prefix rule
+for up to 64 hexadecimal digits. Their tests compare node counts, branch
+counts, leaf counts, covered assignments and hits, not merely zero hits.
 
-Concrete steps:
+The first Python run covered all four families through 56 hex digits, then
+stopped partway through the length-57, leading-width-3 group at its cooperative
+120-second budget. That incomplete group establishes no bound. The native port
+reduces interpreter overhead. Its completed bounds are recorded separately.
 
-- Add an index-range argument so a run can take a slice of one group instead of
-  a whole hex-length range. This turns the program into a worker.
-- Record completed (group, range) pairs in a results file in this repository
-  with machine and timing, so coverage can be audited.
-- The GPU port exists (`src/tripal_cuda.cu`) and runs about 70 times faster
-  than the 16-core CPU on one RTX 4090: 5.7e10 candidates per second. Hex
-  length 39 or 40 takes about 20 s, 47 and 48 together about 80 min, 55 and 56
-  about 2 weeks, 63 and 64 about 10 years. Multiple GPUs scale linearly since
-  work units are independent.
+Useful next experiments:
 
-Honest expectation: see section 3. The heuristic says each new hex length has
-about a 2^-L chance of containing a solution.
+- Profile exact decimal conversion and traversal in the native implementation.
+  Preserve agreement with the Python reference before claiming a new bound.
+- Partition by disjoint outer prefixes for parallel CPU execution. Record the
+  actual prefixes and completed groups so gaps cannot hide behind a grand total.
+- Explore reachable suffix residues modulo powers of five. Unassigned hex digits
+  affect these residues, so an internal node cannot compare its partial value
+  directly with the required decimal suffix modulo `5^k`.
+- Consider independently checkable certificates for rejected subtrees. A solver
+  or tree certificate covers only its finite ranges unless another theorem
+  supplies a global length bound.
 
-## 2. Change the exponent: meet in the middle
+An optional prefix-bucket predicate considers several possible decimal prefixes
+when an interval straddles a prefix boundary. At the measured lengths it visited
+10 to 11 percent fewer nodes but took 29 to 35 percent longer. It remains an
+optional research comparison; `common` is the default. See
+[the measurements](../experiments/BUCKET-PRUNING.md).
 
-The current cost is 2^L per hex length because every free orbit is enumerated.
-The decimal condition has structure the enumeration ignores.
+## 2. Meet in the middle remains an experiment
 
-Observation: the top k decimal digits of a candidate are determined by its top
-roughly 3.32k bits, and the binary palindrome condition ties the top bits to the
-bottom bits, so fixing the outer orbits fixes both the leading decimal digits
-and the value mod 2^m. The decimal palindrome condition then demands that the
-value mod 10^k equal the reversal of those leading digits, a specific residue r.
-Since the value mod 2^k is already fixed, the real constraint is on the value
-mod 5^k, which depends on all orbits.
+Fixing outer orbits can determine a decimal prefix and the low binary bits.
+First reject disagreement between the reversed prefix and the fixed value
+modulo `2^k`. The remaining necessary condition modulo `5^k` is a subset-sum
+condition on the free orbit masks.
 
-That constraint is linear in the orbit choices: each free orbit contributes its
-mask's residue mod 5^k when set. So for each assignment of the outer orbits, the
-inner orbits must sum to a target residue mod 5^k. Split the inner orbits into
-two halves, tabulate the residues of all assignments of one half in a hash map,
-and look up each assignment of the other half. Cost per outer assignment is
-about 2^(f/2) instead of 2^f for f inner orbits. Choosing k so that 5^k is
-comparable to 2^(f/2) keeps the candidate list small, and each survivor still
-gets the full decimal check.
+Split the remaining masks, retain every assignment sharing a residue, and reuse
+the tables across outer assignments. Exact integer intervals must handle
+ambiguous prefixes; a fixed number of high bits does not invariably determine
+the same number of decimal digits.
 
-This would make hex lengths in the 60s reachable on a desktop. The design needs
-care: the Gray-code trick no longer applies, the outer and inner split must be
-chosen per (L, b) group, and the hash tables must be rebuilt or reused across
-outer assignments. A standalone prototype with its pair output checked against
-`tripal_wide pairs` is the right first step.
+The earlier roadmap's `2^(f/2)` estimate was per outer assignment. With `u`
+outer choices and `f` inner choices, a simple implementation also pays for up
+to `2^u` outer assignments and for matching pairs. Under a uniform-residue
+heuristic, there are about `2^f / 5^k` pairs per outer assignment. Table reuse
+and early modulo-`2^k` rejection can help, but neither the heuristic nor the
+projected desktop reach is a proved complexity bound. Benchmark a complete
+implementation against exact pruning before claiming an advantage.
 
-Regan noted that Charlton Harrison's binary-and-decimal palindrome search used
-pruning rules that eliminate swaths of candidates, and asked whether such rules
-exist here. The modular constraint above is one answer; digit-by-digit pruning
-from both ends, as used in the big binary-decimal searches, is another.
+## 3. The GPU enumerator remains an independent check
 
-## 3. Toward a proof
+The corrected GPU implementation independently checks the pruned search. Its
+survivor counter is wide enough for every configured launch, and its overflow
+splitting has a real-kernel regression.
 
-### Why more searching cannot settle it
+Enumeration still visits about `2^L` candidates at hex length L. The old
+projections of days or years describe that algorithm, not a lower bound on the
+cost of the mathematical problem. New multi-day runs should be justified by
+what they add beyond exact pruning and independent checks.
 
-Treat the decimal digits of a candidate as random. A candidate with L hex
-digits has about 1.204 L decimal digits, and a random D-digit number is a
-palindrome with probability about 10^(-D/2). So the probability is about
-10^(-0.602 L), which is 2^(-2L). There are about 2^L candidates per hex length,
-so the expected number of solutions at length L is about 2^(-L), and the
-expected number at all lengths beyond 38 is about 2^-38. The expected total over
-all lengths from 2 upward is about one half, which is consistent with finding
-none. This is a heuristic, not a theorem; the digits are not random. But it
-means an extended search is overwhelmingly likely to report zero again, and
-only a proof can close the question.
+## 4. What a nonexistence proof must add
 
-### What is known for related problems
+The orbit/alphabet construction and pruning rejection rule are proved for
+arbitrary mathematical lengths. Neither says that every length has no survivor.
+A global proof still needs a uniform contradiction, a proved finite length
+bound, or another argument covering every unsearched length.
 
-- Goins (2009) proved finiteness for a related but different question: a
-  d-digit decimal palindrome that is also a d-digit palindrome in another base.
-  The argument leans on the two representations having the same length. Here the
-  binary representation is about 3.32 times longer than the decimal one, so the
-  technique does not transfer directly.
-- Palindromes in bases 2 and 10 alone are conjectured to be infinite, with
-  dozens known (OEIS A007632) and record holders found by pruned searches. No
-  finiteness or infinitude proof exists even for two bases. Three bases is
-  strictly harder in the sense that any infinitude proof would imply one for
-  two bases.
-- Bérczes and Ziegler (2014) study simultaneous palindromes with analytic tools
-  and give explicit lists for small bounds.
+Even-length decimal palindromes are divisible by 11, even-bit binary
+palindromes by 3, and even-length hex palindromes by 17. These necessary
+conditions do not by themselves conflict.
 
-### Possible lines of attack
+A fixed residue-only sieve has a specific limitation. For any modulus M and
+base b, write `M = u*v`, where the prime factors of u divide b and `gcd(b,v)=1`.
+Choose arbitrarily large t with `u | b^t` and `b^t = 1 mod v`. Then
+`1 + b^t + ... + b^(v*t)` is a base-b palindrome congruent to 1 modulo M.
+For b=16 it is also binary-palindromic; b=10 gives decimal palindromes in the
+same residue. Thus comparing the possible residues of those two families
+separately modulo any fixed finite collection of moduli cannot separate them.
+Length-dependent or combined digit/carry arguments remain possible.
 
-1. **Modular obstructions.** A decimal palindrome with an even digit count is
-   divisible by 11. A binary palindrome with an even bit count is divisible by
-   3. A hex palindrome with an even digit count is divisible by 17. The leading
-   digit structure (digits 0, 6, 9, F for the 9/F family) pins residues modulo
-   small numbers. These rule out subfamilies, and a complete case analysis might
-   kill all even-length or all odd-length cases, which would halve the search
-   and point toward structure. A full non-existence proof this way seems
-   unlikely because the constraints are finite and the families are infinite,
-   but partial results are publishable.
-2. **Carry analysis.** The binary structure forces the top and bottom bits to
-   mirror. Decimal palindromicity forces the top and bottom decimal digits to
-   mirror. Since the bottom decimal digits depend on the value mod 5^k and the
-   top ones on the magnitude, one could ask whether the mirrored bit pattern
-   forces a contradiction between the two after enough digits. This is the
-   proof-shaped version of the meet-in-the-middle observation.
-3. **Density arguments** show at most that solutions are sparse, which the
-   heuristic already suggests. They cannot prove absence.
+The random-digit model gives about `2^(-L)` expected hits at hex length L,
+up to length- and endpoint-dependent factors. This motivates expecting more
+empty searches, but gives neither a rigorous probability of existence nor a
+proof that the solution set is empty.
 
-A contribution here would be a lemma that eliminates one of the four
-leading-digit families for all lengths, with a proof short enough to check by
-hand or in a proof assistant.
+Goins' 2009 theorem concerns equal digit counts in two bases; the unrestricted
+representations here have different lengths. Berczes and Ziegler's 2014 work
+bounds special structured families and does not settle this three-base problem.
+Their papers are linked from the README. Carry analysis and exact constraints
+remain research tools, not a completed proof or a promise that a proof is close.

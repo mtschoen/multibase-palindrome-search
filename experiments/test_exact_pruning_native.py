@@ -43,6 +43,7 @@ class NativePruningTests(unittest.TestCase):
             for row in rows:
                 with self.subTest(length=length, leading_bits=row['leading_bits']):
                     expected = asdict(exact_pruning.search(length, row['leading_bits']))
+                    self.assertEqual(expected.pop('pruner'), 'common')
                     expected.pop('elapsed_nanoseconds')
                     row.pop('elapsed_nanoseconds', None)
                     self.assertEqual(row, expected)
@@ -72,6 +73,7 @@ class NativePruningTests(unittest.TestCase):
         self.assertEqual([row['leading_bits'] for row in rows], [1, 2])
         for row in rows:
             expected = asdict(exact_pruning.search(64, row['leading_bits']))
+            self.assertEqual(expected.pop('pruner'), 'common')
             expected.pop('elapsed_nanoseconds')
             row.pop('elapsed_nanoseconds', None)
             self.assertEqual(row, expected)

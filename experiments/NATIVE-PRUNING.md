@@ -3,7 +3,9 @@
 This standalone CPU prototype ports `exact_pruning.py` without changing its
 digit alphabets, endpoint order, outside-in traversal, leaf-before-prune decision,
 or exact common-prefix rejection. It supports inclusive hex lengths 1 through
-64. It does not change the production search or establish a new published bound.
+64. It does not change the original enumerators. Completed search bounds are
+recorded in [RESULTS.md](../docs/RESULTS.md); the program alone is not a proof
+about an unexecuted range.
 
 ```powershell
 clang -O3 -Wall -Wextra --rtlib=compiler-rt -o bin/exact_pruning_native.exe experiments/exact_pruning_native.c
@@ -52,7 +54,9 @@ count (less than 2^64). Each completed group checks coverage equals assignments.
 ## Verification on Windows, 2026-11-02
 
 The first new test was observed failing before implementation. The final command
-above passed all 10 tests: five existing Python tests and five new native tests.
+above now passes 11 tests: six Python tests and five native tests. The original
+port was checked against the five-test common-prefix baseline before the
+optional bucket experiment was integrated.
 The native tests compare every accounting/node/leaf field and sorted hits for all
 four groups at lengths 1..12, 16, 20, 24, 28, 32, and groups 1/2 at length 64.
 They also check CLI selection, ten invalid invocations, and 28 independent Python
@@ -69,11 +73,12 @@ produced zero warnings; `clang --analyze -Wall -Wextra -Xanalyzer
 -analyzer-output=text experiments/exact_pruning_native.c` produced zero findings.
 
 Best-effort LLVM coverage of the native CLI (lengths 1..32, length 64 groups 1/2,
-and invalid range) measured 146 lines, three missed: 97.95% line coverage,
-93.80% region coverage, 84.62% branch coverage, all nine functions executed.
+selection and all ten invalid invocations) measured 146 lines, three missed:
+97.95% line coverage, 96.12% region coverage, 93.59% branch coverage, with all
+nine functions executed.
 The missed lines are the internal accounting-failure block. Some CLI branches
 and allocation-failure branches were not covered in this instrumented run;
-CLI validation is covered more extensively by the normal tests. The non-x86
+CLI validation is also covered by the normal tests. The non-x86
 fallback was not built here. This is not full repository or GPU coverage.
 
 Coverage reproduction: compile with the same flags plus
@@ -103,8 +108,8 @@ Commands were `bin/exact_pruning_native.exe L L` and
 groups ran each time. All non-timing fields agree at 32, 40 and 48. Length 56
 native group 3 visited 3,180,646 nodes and examined 1,301,944 leaves; group 4
 visited 59,041,002 nodes and examined 25,568,796 leaves. Each covered exactly
-36,028,797,018,963,968 assignments. No long length-64 sweep was attempted.
-The parent reviewer should audit this prototype before running further groups.
+36,028,797,018,963,968 assignments. These were pre-audit benchmarks. The later
+reviewed, capped 1..64 run and its completed bounds are in RESULTS.md.
 
 The README and build instructions remain accurate for the production programs;
 the experimental commands and limits are documented only here as requested.
