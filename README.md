@@ -18,12 +18,11 @@ decimal and hexadecimal and a palindrome in binary. Nothing else is known.
 The question came up on The Rest Is Science, the Goalhanger podcast hosted
 by Hannah Fry and Michael Stevens, in the episode
 [Is 100 Better Than 101?](https://www.youtube.com/watch?v=mvUSeUl29d0), where
-Stevens mentioned that nobody has found such a number and cited a
-source that sounded like "all things binary". Hearing that on a quiet evening
-with an idle 16-core machine is how this repository started: the first program
-was a brute-force scan written to see whether 2^32 would be enough. It was not,
-and the rest followed from there. The source Stevens meant is
-Rick Regan's blog Exploring Binary, specifically
+Stevens mentioned that nobody has found such a number, citing Rick Regan's
+blog Exploring Binary. Hearing that on a quiet evening with an idle 16-core
+machine is how this repository started: the first program was a brute-force
+scan written to see whether 2^32 would be enough. It was not, and the rest
+followed from there. Regan's article is
 [In Search of Decimal/Binary/Hexadecimal Palindromes](https://www.exploringbinary.com/in-search-of-decimal-binary-hexadecimal-palindromes/)
 from April 2010, which reports a search that found nothing and asks whether
 existence can be proved either way.
