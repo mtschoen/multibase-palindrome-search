@@ -20,9 +20,11 @@ Concrete steps:
   a whole hex-length range. This turns the program into a worker.
 - Record completed (group, range) pairs in a results file in this repository
   with machine and timing, so coverage can be audited.
-- A GPU port is the natural 100x. Per-candidate work is a handful of 64-bit
-  XORs, a double multiply, and a mod-1000 compare; it maps cleanly onto one
-  thread per candidate with the Gray-code start computed per block.
+- The GPU port exists (`src/tripal_cuda.cu`) and runs about 70 times faster
+  than the 16-core CPU on one RTX 4090: 5.7e10 candidates per second. Hex
+  length 39 or 40 takes about 20 s, 47 and 48 together about 80 min, 55 and 56
+  about 2 weeks, 63 and 64 about 10 years. Multiple GPUs scale linearly since
+  work units are independent.
 
 Honest expectation: see section 3. The heuristic says each new hex length has
 about a 2^-L chance of containing a solution.

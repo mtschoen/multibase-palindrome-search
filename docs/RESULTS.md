@@ -17,9 +17,18 @@ the range includes them; no other hit occurred in any run.
 | tripal_wide | 33 to 36 hex digits | 171,799,478,272 | 0 | 229.5 s |
 | tripal_wide | 37 to 38 hex digits | 549,756,862,464 | 0 | 688.8 s |
 | tripal_wide | 39 to 64 hex digits, leading digits 1 and 3 only | 17,177,772,032 | 0 | 11.1 s |
+| tripal_cuda (RTX 4090) | 1 to 32 hex digits | 11,453,508,260 | 0 | 0.2 s |
+| tripal_cuda (RTX 4090) | 39 to 45 hex digits | 116,548,705,976,320 | 0 | 1,599.6 s |
 
-Combined: every integer below 2^152 is covered, and the leading-digit 1 and 3
-subsets are covered to 2^256.
+Combined: every integer below 2^180 (45 hex digits, about 1.5e54) is covered,
+and the leading-digit 1 and 3 subsets are covered to 2^256.
+
+The GPU run for 39 to 45 was one invocation of `bin/tripal_cuda 39 46`; it
+completed every group through hex length 45 and then stopped at the first
+length-46 group because a launch chunk overflowed the survivor buffer, which
+the program treats as a fatal error rather than dropping candidates. The
+per-group lines in its log give the counts above. Length 46 is being rerun with
+the chunk-splitting fix.
 
 ## Candidate counts by group
 
@@ -51,6 +60,16 @@ tripal_wide processes about 8.0e8 candidates per second on this machine, about
 20 ns per candidate per physical core. The 37 to 38 chunk is the reference
 measurement: 549,756,862,464 candidates in 688.8 s.
 
+tripal_cuda processes about 7e10 candidates per second on the RTX 4090, roughly
+90 times the CPU program. Per hex length in the 39 to 45 run, both large groups
+together: 39 in 15.2 s, 41 in 60.5 s, 43 in 239.7 s, 45 in 969.4 s.
+
+Survivor counts per group in the GPU run vary by two orders of magnitude (3,331
+to 7,446,010) because fall-through candidates share leading-bit prefixes and are
+passed to the host in blocks; this is conservative and does not affect
+correctness, but it is why the survivor buffer needs the chunk-splitting
+fallback.
+
 ## Commands
 
 ```
@@ -67,13 +86,13 @@ bin/tripal_wide 39 64 32 12         # 32 threads, leading bits 1 and 2 only
 ## Projection
 
 Each additional hex digit for the 5, 7, 9, F subsets doubles the work. At the
-measured rate on this machine:
+measured rates on this machine:
 
-| Hex length | Candidates | Estimated wall time |
-|---|---|---|
-| 39 | 2^40 | 23 min |
-| 40 | 2^40 | 23 min |
-| 41 and 42 | 2^42 | 1.5 h |
-| 43 and 44 | 2^44 | 6 h |
-| 47 and 48 | 2^48 | 4 days |
-| 63 and 64 | 2^64 | about 700 years |
+| Hex length | Candidates | 16-core CPU | RTX 4090 |
+|---|---|---|---|
+| 46 | 2^46 | 1 day | 17 min |
+| 47 and 48 | 2^48 | 4 days | 70 min |
+| 49 and 50 | 2^50 | 16 days | 4.5 h |
+| 51 and 52 | 2^52 | 2 months | 18 h |
+| 55 and 56 | 2^56 | 3 years | 12 days |
+| 63 and 64 | 2^64 | about 700 years | about 8 years |

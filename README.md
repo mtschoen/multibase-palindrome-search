@@ -35,17 +35,17 @@ bounds:
 | Subset by leading hex digit | Searched through | Equivalent upper bound |
 |---|---|---|
 | 1 or 3 | 64 hex digits | 2^256, about 1.2e77 |
-| 5, 7, 9 or F | 38 hex digits | 2^152, about 5.7e45 |
+| 5, 7, 9 or F | 45 hex digits | 2^180, about 1.5e54 |
 
 Other leading digits cannot occur: even digits end in a zero bit, and B and D
 fail the case analysis (see Method). Together the two rows cover every integer
-below 2^152, and the first row alone covers its subset to 2^256.
+below 2^180, and the first row alone covers its subset to 2^256.
 
 Prior art: Regan's 2010 search covered the 1 or 3 subset through 64 hex digits
 and the 5, 7, 9, F subset through 32 hex digits. This work confirms both bounds
 independently with a different construction and extends the second from 32 to
-38 hex digits. The new ground is hex lengths 33 to 38 for leading digits 5, 7,
-9 and F, about 7.2e11 candidates.
+45 hex digits: lengths 33 to 38 on a 16-core CPU, lengths 39 to 45 on one
+RTX 4090. The new ground is about 1.2e14 candidates.
 
 Timings, counts and the exact commands are in [docs/RESULTS.md](docs/RESULTS.md).
 
@@ -90,9 +90,17 @@ Four programs are included, in the order they were written:
 | `src/tripal_hex.c` | mirror hex halves to generate hex palindromes | 64-bit values |
 | `src/tripal128.c` | orbit construction, 128-bit arithmetic | 128-bit values |
 | `src/tripal_wide.c` | orbit construction, 256-bit limbs, incremental residue | 256-bit values |
+| `src/tripal_cuda.cu` | the same construction on an NVIDIA GPU, two-stage device prefilter | 256-bit values |
 
 The earlier programs are kept because they are independent implementations that
 the later ones were checked against. None of the hot paths use strings.
+
+The GPU version keeps one contiguous Gray-code slice per thread and tracks the
+value mod 10^9 incrementally. Its first stage compares the first three decimal
+digits, taken as a float from the top 32 bits, against the last three; its
+second stage compares nine digits, taken as a double from the top 64 bits,
+against the last nine. Survivors go to the host for the exact check. On an
+RTX 4090 it covers the 128-bit range in 0.2 s, about 70 times the 16-core CPU.
 
 ## Verification
 
@@ -120,12 +128,18 @@ division helpers from compiler-rt, hence the extra flag.
 sh build.sh         # builds bin/tripal, bin/tripal_hex, bin/tripal128, bin/tripal_wide
 sh build.sh check   # self-tests, cross-program agreement, verify mode to 24 hex digits
 make check          # same, for environments with make (untested here; mirrors build.sh)
+build_cuda.bat      # Windows: builds bin\tripal_cuda.exe with nvcc, locating MSVC if needed
+nvcc -O3 -arch=native -o bin/tripal_cuda src/tripal_cuda.cu    # elsewhere
 
 bin/tripal_wide 1 32                 # all of 128 bits, about 15 s on 16 cores
 bin/tripal_wide 39 39                # next unexplored hex length, about 23 min on 16 cores
 bin/tripal_wide 39 64 32 12          # leading digits 1 and 3 only, through 64 hex digits
 bin/tripal_wide pairs 1 6            # list every base 2 + base 16 palindrome up to 6 hex digits
 bin/tripal_wide verify 1 28          # assert residue and prefilter consistency per candidate
+
+bin/tripal_cuda 39 40                # GPU search, about 20 s per hex length at this size on a 4090
+bin/tripal_cuda all 1 20             # every candidate, for comparison with tripal_wide pairs
+bin/tripal_cuda stage1 1 30          # stage-1 survivors, classified on the host against exact digits
 ```
 
 Each `done:` line reports hits, candidates visited and wall time. Candidates

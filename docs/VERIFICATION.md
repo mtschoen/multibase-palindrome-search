@@ -59,6 +59,30 @@ three decimal digits genuinely mirror, the prefilter rejected none.
 residue directly for every candidate and compares: zero mismatches over
 2,863,442,596 candidates across all 120 groups up to 30 hex digits.
 
+## The GPU port
+
+`src/tripal_cuda.cu` reimplements the enumeration and adds a two-stage device
+prefilter, so it was checked against the CPU programs on each point:
+
+| Check | Range | Result |
+|---|---|---|
+| `tripal_cuda all` candidate list vs `tripal_wide pairs` | up to 20 hex digits | identical, 2,800,292 entries |
+| `tripal_cuda 1 32` hits and candidate count vs CPU | up to 32 hex digits | 5 single-digit hits, 11,453,508,260 candidates |
+| stage-1 survivors with genuinely mirrored 3-digit ends vs `tripal_wide verify` count | up to 30 hex digits | 3,835,469 + 9 short numbers = 3,835,478, equal |
+| stage-2 survivors with genuinely mirrored 9-digit ends vs `tripal_wide verify` count | up to 32 hex digits | 20 = 20, equal |
+
+The two survivor comparisons are the substantive ones: they show that neither
+device stage ever rejected a candidate whose end digits truly mirror, which is
+the only way a stage could lose a palindrome. The 9 short numbers are
+candidates under six decimal digits, which the CPU rule counts with overlapping
+digits and the GPU host classifies separately; the Python check in the session
+confirmed exactly 9 such numbers.
+
+Fall-through behaviour is as designed and conservative: numbers with 18 or 19
+decimal digits have no middle digits between the first and last nine, so the
+rounding test passes them all to the host, and large groups pass about 6 in
+10 million.
+
 ## What was not verified, or is weaker
 
 - **No positive control.** No non-trivial hit exists to plant, so the full

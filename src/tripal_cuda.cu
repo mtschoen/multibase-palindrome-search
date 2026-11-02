@@ -26,6 +26,7 @@
 #include <string.h>
 #include <math.h>
 #include <chrono>
+#include <utility>
 #include <vector>
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -376,9 +377,17 @@ int main(int argc, char **argv) {
         const group_description &group = groups[group_index];
         CUDA_CHECK(cudaMemcpyToSymbol(device_group, &group, sizeof group));
         unsigned group_survivors = 0;
-        /* large groups run in index chunks so the survivor buffer stays bounded */
+        /* Large groups run in index chunks so the survivor buffer stays bounded. Survivor
+         * counts are quantized by shared leading-bit prefixes, so a chunk can overflow
+         * unexpectedly; an overflowing chunk is split in half and both halves retried. */
+        std::vector<std::pair<uint64_t, uint64_t>> pending;
         for (uint64_t chunk_begin = 0; chunk_begin < group.count; chunk_begin += CHUNK_SIZE) {
             uint64_t chunk_end = chunk_begin + CHUNK_SIZE < group.count ? chunk_begin + CHUNK_SIZE : group.count;
+            pending.push_back(std::make_pair(chunk_begin, chunk_end));
+        }
+        while (!pending.empty()) {
+            uint64_t chunk_begin = pending.back().first, chunk_end = pending.back().second;
+            pending.pop_back();
             CUDA_CHECK(cudaMemset(device_count, 0, sizeof(unsigned)));
             search_kernel<<<grid_size, block_size>>>(mode, chunk_begin, chunk_end, device_survivors, device_count, SURVIVOR_CAPACITY);
             CUDA_CHECK(cudaGetLastError());
@@ -386,9 +395,17 @@ int main(int argc, char **argv) {
             unsigned count;
             CUDA_CHECK(cudaMemcpy(&count, device_count, sizeof count, cudaMemcpyDeviceToHost));
             if (count > SURVIVOR_CAPACITY) {
-                fprintf(stderr, "survivor buffer overflow in group hex_length=%d leading_bits=%d: %u survivors, capacity %u\n",
-                        group.hex_length, group.leading_bits, count, SURVIVOR_CAPACITY);
-                return 1;
+                if (chunk_end - chunk_begin < 2) {
+                    fprintf(stderr, "survivor buffer overflow on a single index in group hex_length=%d leading_bits=%d\n",
+                            group.hex_length, group.leading_bits);
+                    return 1;
+                }
+                uint64_t middle = chunk_begin + (chunk_end - chunk_begin) / 2;
+                fprintf(stderr, "  splitting chunk [%llu, %llu) of hex_length=%d leading_bits=%d: %u survivors exceed capacity %u\n",
+                        (unsigned long long)chunk_begin, (unsigned long long)chunk_end, group.hex_length, group.leading_bits, count, SURVIVOR_CAPACITY);
+                pending.push_back(std::make_pair(middle, chunk_end));
+                pending.push_back(std::make_pair(chunk_begin, middle));
+                continue;
             }
             survivors.resize(count);
             if (count > 0) CUDA_CHECK(cudaMemcpy(survivors.data(), device_survivors, sizeof(wide) * count, cudaMemcpyDeviceToHost));
