@@ -49,11 +49,60 @@ def interval_rejects(lower, upper, fixed_value, fixed_bits):
     return (required_suffix & mask) != (fixed_value & mask)
 
 
+def _bucket_piece_rejects(lower, upper, fixed_value, fixed_bits, decimal_digits):
+    """Check at most four prefixes of one decimal digit length."""
+    maximum_digits = min(fixed_bits, decimal_digits // 2)
+    width = upper - lower
+    count = (maximum_digits if width == 0 else
+             min(maximum_digits, decimal_digits - len(str(width))))
+    divisor = 10 ** (decimal_digits - count)
+    if count < maximum_digits:
+        extended_divisor = divisor // 10
+        if upper // extended_divisor - lower // extended_divisor < 4:
+            count += 1
+            divisor = extended_divisor
+    if count == 0:
+        return False
+    # Width-based selection guarantees <=2 prefixes before the one extension.
+    # A second extension would span at least ten prefixes, so cannot help.
+    mask = (1 << count) - 1
+    residue = fixed_value & mask
+    for prefix in range(lower // divisor, upper // divisor + 1):
+        if int(str(prefix)[::-1]) & mask == residue:
+            return False
+    return True
+
+
+def bucket_interval_rejects(lower, upper, fixed_value, fixed_bits):
+    """Conservative prefix-bucket rejection for nonnegative integer intervals.
+
+    As with interval_rejects, callers supply ordered bounds and nonnegative bits.
+    Split one decimal-length boundary; wider intervals conservatively pass.
+    Each piece enumerates at most four prefixes, capped at half its digit count
+    and the fixed bit count. A matching residue is necessary, not sufficient.
+    """
+    if interval_rejects(lower, upper, fixed_value, fixed_bits):
+        return True
+    lower_length = len(str(lower))
+    upper_length = len(str(upper))
+    if upper_length == lower_length:
+        return _bucket_piece_rejects(lower, upper, fixed_value, fixed_bits, lower_length)
+    if upper_length != lower_length + 1:
+        return False
+    boundary = 10 ** lower_length
+    return (_bucket_piece_rejects(lower, boundary - 1, fixed_value, fixed_bits, lower_length)
+            and _bucket_piece_rejects(boundary, upper, fixed_value, fixed_bits, upper_length))
+
+
+PRUNERS = {'common': interval_rejects, 'buckets': bucket_interval_rejects}
+
+
 @dataclass
 class SearchResult:
     length: int
     leading_bits: int
     assignments: int
+    pruner: str = 'common'
     visited_nodes: int = 0
     pruned_branches: int = 0
     pruned_assignments: int = 0
@@ -64,7 +113,7 @@ class SearchResult:
     hits: list = field(default_factory=list)
 
 
-def search(length, leading_bits, budget_seconds=None):
+def search(length, leading_bits, budget_seconds=None, pruner='common'):
     """Search one group; a budget is a cooperative limit checked per 4096 nodes.
 
     Covered assignments counts disjoint pruned subtrees plus exact leaf checks.
@@ -74,6 +123,9 @@ def search(length, leading_bits, budget_seconds=None):
         raise ValueError('positive hex length and leading bits 1 through 4 required')
     if budget_seconds is not None and budget_seconds <= 0:
         raise ValueError('budget must be positive')
+    if pruner not in PRUNERS:
+        raise ValueError('pruner must be common or buckets')
+    rejects = PRUNERS[pruner]
     endpoints, inner_digits = GROUPS[leading_bits]
     weights = mirrored_weights(length)
     remaining_maximum = [max(inner_digits) * sum(weights[depth:])
@@ -81,7 +133,7 @@ def search(length, leading_bits, budget_seconds=None):
     subtree_counts = [len(inner_digits) ** (len(weights) - depth)
                       for depth in range(len(weights) + 1)]
     result = SearchResult(length, leading_bits,
-                          len(endpoints) * subtree_counts[1])
+                          len(endpoints) * subtree_counts[1], pruner=pruner)
     start = monotonic_ns()
     deadline = None if budget_seconds is None else start + budget_seconds * 10**9
 
@@ -97,7 +149,7 @@ def search(length, leading_bits, budget_seconds=None):
             if decimal_digits == decimal_digits[::-1]:
                 result.hits.append(value)
             return
-        if interval_rejects(value, value + remaining_maximum[depth], value, 4 * depth):
+        if rejects(value, value + remaining_maximum[depth], value, 4 * depth):
             result.pruned_branches += 1
             result.pruned_assignments += subtree_counts[depth]
             return
@@ -127,6 +179,7 @@ def main(arguments=None):
                         default=[1, 2, 3, 4])
     parser.add_argument('--budget-seconds', type=int,
                         help='cooperative time limit per group; incomplete exits 1')
+    parser.add_argument('--pruner', choices=PRUNERS, default='common')
     options = parser.parse_args(arguments)
     if options.minimum_length < 1 or options.maximum_length < options.minimum_length:
         parser.error('require 1 <= minimum_length <= maximum_length')
@@ -134,7 +187,7 @@ def main(arguments=None):
         parser.error('budget seconds must be positive')
     for length in range(options.minimum_length, options.maximum_length + 1):
         for leading_bits in sorted(set(options.leading_bits)):
-            result = search(length, leading_bits, options.budget_seconds)
+            result = search(length, leading_bits, options.budget_seconds, options.pruner)
             print(json.dumps(asdict(result), sort_keys=True), flush=True)
             if not result.completed:
                 return 1
