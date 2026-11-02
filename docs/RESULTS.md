@@ -141,15 +141,44 @@ bin/tripal_wide 37 38
 bin/tripal_wide 39 64 32 12         # 32 threads, leading bits 1 and 2 only
 ```
 
-## Projection for exhaustive enumeration
+## Performance after exact pruning
+
+The old enumeration projections do not predict the new search's cost. Exact
+pruning rules out whole subtrees instead of visiting every candidate. These are
+measured results, with different scopes and timing conventions stated explicitly:
+
+| Completed scope | Exact implementation | Measured time |
+|---|---|---|
+| Length 48 alone, all families | Native C | 1.587 s process wall time |
+| Length 56 alone, all families | Native C | 31.812 s process wall time |
+| All lengths 1..46 | Python common-prefix | 27.964 s traversal |
+| All lengths 1..56 | Python common-prefix | 434.205 s traversal |
+| All lengths 1..63, plus length-64 widths 1/2/3 | Native C | completed within an 18-minute run that also spent time on the unfinished final group |
+
+In particular, length 56 alone took about 32 seconds on one CPU process rather
+than the old enumerator's projected 12 GPU days for that length. These are
+different algorithms, not an improvement in candidates enumerated per second.
+The native run did not finish length-64 width 4 (digits 9/F), so there is no
+measured time here for completing the entire 64-digit range.
+
+No reliable larger-length projection has been established for pruning. Branch
+survival depends strongly on the length, digit family, and decimal boundaries;
+the old doubling-per-digit rule does not transfer. The experiment notes contain
+the benchmark commands and single-measurement limitations.
+
+### Historical projections for exhaustive enumeration
 
 For the original enumerators, each additional hex digit for the 5, 7, 9, F
-subsets doubles the work on average. At the measured rates on this machine:
+subsets doubles the work on average. The estimates below use about 8e8 candidates
+per second on the 16-core CPU and 7e10 on the RTX 4090. Counts cover the dominant
+5/7/9/F families and are **per single length**, not per pair. Earlier versions
+labeled rows "47 and 48" etc.; enumerating both lengths costs roughly twice
+the listed amount. These remain historical comparisons, not pruning forecasts.
 
-| Hex length | Candidates | 16-core CPU | RTX 4090 |
+| Single hex length | Candidates per length | 16-core CPU estimate | RTX 4090 estimate |
 |---|---|---|---|
-| 47 and 48 | 2^48 | 4 days | 70 min |
-| 49 and 50 | 2^50 | 16 days | 4.5 h |
-| 51 and 52 | 2^52 | 2 months | 18 h |
-| 55 and 56 | 2^56 | 3 years | 12 days |
-| 63 and 64 | 2^64 | about 700 years | about 8 years |
+| 47 or 48 | 2^48 | 4.1 days | 67 min |
+| 49 or 50 | 2^50 | 16.3 days | 4.5 h |
+| 51 or 52 | 2^52 | 65 days | 18 h |
+| 55 or 56 | 2^56 | 2.9 years | 11.9 days |
+| 63 or 64 | 2^64 | about 730 years | about 8.4 years |
