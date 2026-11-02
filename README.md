@@ -15,8 +15,14 @@ backwards in binary, in decimal and in hexadecimal?
 The single digits 0, 1, 3, 5, 7 and 9 qualify trivially: each is one digit in
 decimal and hexadecimal and a palindrome in binary. Nothing else is known.
 
-The question came up on the podcast The Rest Is Science, where Michael Stevens
-mentioned it with a source that sounded like "all things binary". The source is
+The question came up on The Rest Is Science, the Goalhanger podcast hosted
+by Hannah Fry and Michael Stevens, in the episode
+[Is 100 Better Than 101?](https://www.youtube.com/watch?v=mvUSeUl29d0), where
+Stevens mentioned that nobody has found such a number and cited a
+source that sounded like "all things binary". Hearing that on a quiet evening
+with an idle 16-core machine is how this repository started: the first program
+was a brute-force scan written to see whether 2^32 would be enough. It was not,
+and the rest followed from there. The source Stevens meant is
 Rick Regan's blog Exploring Binary, specifically
 [In Search of Decimal/Binary/Hexadecimal Palindromes](https://www.exploringbinary.com/in-search-of-decimal-binary-hexadecimal-palindromes/)
 from April 2010, which reports a search that found nothing and asks whether
@@ -153,6 +159,7 @@ searching will almost certainly find nothing, and only a proof can settle it.
 
 ## References
 
+- The Rest Is Science, [Is 100 Better Than 101?](https://www.youtube.com/watch?v=mvUSeUl29d0), the episode that prompted this.
 - Rick Regan, [In Search of Decimal/Binary/Hexadecimal Palindromes](https://www.exploringbinary.com/in-search-of-decimal-binary-hexadecimal-palindromes/), Exploring Binary, 2010.
 - Rick Regan, [The Structure of Binary/Hexadecimal Palindromes](https://www.exploringbinary.com/the-structure-of-binary-hexadecimal-palindromes/), Exploring Binary.
 - OEIS [A006995](https://oeis.org/A006995) binary palindromes, [A029730](https://oeis.org/A029730) hexadecimal palindromes, [A007632](https://oeis.org/A007632) palindromes in bases 2 and 10, [A319583](https://oeis.org/A319583) palindromes in bases 2, 4 and 16.
