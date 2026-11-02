@@ -1,0 +1,12 @@
+# build outputs
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+build/
+bin/
+
+# run logs and raw output stay out of the repository; results are recorded as counts in docs/RESULTS.md
+*.log
+*.txt
