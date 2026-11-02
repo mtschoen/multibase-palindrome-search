@@ -274,6 +274,7 @@ struct worker_arguments {
     uint64_t residue_mismatches;
     uint64_t prefilter_mismatches;
     uint64_t ends_matched;
+    uint64_t nine_matched;       /* at least 18 decimal digits with the first and last nine mirrored */
 };
 
 static void search(struct worker_arguments *arguments) {
@@ -301,6 +302,9 @@ static void search(struct worker_arguments *arguments) {
                 int length = decimal_digits(&value, digits);
                 int ends_match = length < 3 || (digits[0] == digits[length - 1] && digits[1] == digits[length - 2] && digits[2] == digits[length - 3]);
                 if (ends_match) arguments->ends_matched++;
+                int nine_match = length >= 18;
+                for (int digit = 0; digit < 9 && nine_match; digit++) if (digits[digit] != digits[length - 1 - digit]) nine_match = 0;
+                if (nine_match) arguments->nine_matched++;
                 /* the prefilter may never reject a candidate whose first three and last three decimal digits mirror */
                 if (ends_match && !decimal_ends_match(&value, residue, top_limb, exponent_estimate)) arguments->prefilter_mismatches++;
                 if (is_palindrome_base10_wide(&value)) { arguments->found_count++; print_hit(&value); }
@@ -471,7 +475,7 @@ int main(int argc, char **argv) {
         pthread_create(&threads[index], NULL, worker_entry, &arguments[index]);
 #endif
     }
-    uint64_t total_found = 0, visited = 0, residue_mismatches = 0, prefilter_mismatches = 0, ends_matched = 0;
+    uint64_t total_found = 0, visited = 0, residue_mismatches = 0, prefilter_mismatches = 0, ends_matched = 0, nine_matched = 0;
     for (int index = 0; index < thread_count; index++) {
 #ifdef _WIN32
         WaitForSingleObject(threads[index], INFINITE);
@@ -484,9 +488,10 @@ int main(int argc, char **argv) {
         residue_mismatches += arguments[index].residue_mismatches;
         prefilter_mismatches += arguments[index].prefilter_mismatches;
         ends_matched += arguments[index].ends_matched;
+        nine_matched += arguments[index].nine_matched;
     }
-    if (verify) printf("verify: %llu residue mismatches, %llu prefilter rejections among %llu candidates with mirrored end digits\n",
-                       (unsigned long long)residue_mismatches, (unsigned long long)prefilter_mismatches, (unsigned long long)ends_matched);
+    if (verify) printf("verify: %llu residue mismatches, %llu prefilter rejections among %llu candidates with mirrored end digits, %llu candidates with nine mirrored end digits\n",
+                       (unsigned long long)residue_mismatches, (unsigned long long)prefilter_mismatches, (unsigned long long)ends_matched, (unsigned long long)nine_matched);
     double elapsed = (double)(clock() - wall_start) / CLOCKS_PER_SEC;
     printf("done: %llu hits among %llu candidates visited in %.1f s\n",
            (unsigned long long)total_found, (unsigned long long)visited, elapsed);
