@@ -112,8 +112,9 @@ Windows and POSIX thread backends). The 128-bit and 256-bit programs use 128-bit
 division helpers from compiler-rt, hence the extra flag.
 
 ```
-make            # builds bin/tripal, bin/tripal_hex, bin/tripal128, bin/tripal_wide
-make check      # self-tests, cross-program agreement, verify mode to 24 hex digits
+sh build.sh         # builds bin/tripal, bin/tripal_hex, bin/tripal128, bin/tripal_wide
+sh build.sh check   # self-tests, cross-program agreement, verify mode to 24 hex digits
+make check          # same, for environments with make (untested here; mirrors build.sh)
 
 bin/tripal_wide 1 32                 # all of 128 bits, about 15 s on 16 cores
 bin/tripal_wide 39 39                # next unexplored hex length, about 23 min on 16 cores
