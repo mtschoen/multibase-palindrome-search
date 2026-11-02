@@ -3,6 +3,7 @@ setlocal
 rem Builds src\tripal_cuda.cu with nvcc. nvcc needs the MSVC host compiler on PATH;
 rem if cl.exe is not already there, this loads it from any Visual Studio 2022 edition.
 rem Set CUDA_ARCH to override the GPU architecture (default: native, the GPU in this machine).
+rem Pass check to also build and run the focused GPU regressions.
 
 where cl >nul 2>nul
 if not errorlevel 1 goto :build
@@ -23,3 +24,8 @@ if not exist bin mkdir bin
 nvcc -O3 -arch=%CUDA_ARCH% -o bin\tripal_cuda.exe src\tripal_cuda.cu
 if errorlevel 1 exit /b 1
 echo built bin\tripal_cuda.exe
+if /i not "%~1"=="check" exit /b 0
+nvcc -O3 -arch=%CUDA_ARCH% -o bin\tripal_cuda_test.exe tests\tripal_cuda_test.cu
+if errorlevel 1 exit /b 1
+bin\tripal_cuda_test.exe
+if errorlevel 1 exit /b 1

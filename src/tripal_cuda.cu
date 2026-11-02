@@ -74,7 +74,7 @@ __device__ __forceinline__ uint64_t extract_bits(const wide &value, int low_bit)
 }
 
 __global__ void search_kernel(int mode, uint64_t chunk_begin, uint64_t chunk_end,
-                              wide *survivors, unsigned *survivor_count, unsigned capacity) {
+                              wide *survivors, unsigned long long *survivor_count, unsigned capacity) {
     __shared__ wide masks[MAXIMUM_ORBITS];
     __shared__ uint32_t mask_residue[MAXIMUM_ORBITS];
     const int free_count = device_group.free_count;
@@ -160,7 +160,7 @@ __global__ void search_kernel(int mode, uint64_t chunk_begin, uint64_t chunk_end
             }
         }
         if (survive) {
-            unsigned slot = atomicAdd(survivor_count, 1u);
+            unsigned long long slot = atomicAdd(survivor_count, 1ull);
             if (slot < capacity) survivors[slot] = value;
         }
         index++;
@@ -326,6 +326,54 @@ static int build_group(int hex_length, int leading_bits, group_description *grou
 #define CUDA_CHECK(call) do { cudaError_t error = (call); if (error != cudaSuccess) { \
     fprintf(stderr, "CUDA error %s at %s:%d\n", cudaGetErrorString(error), __FILE__, __LINE__); exit(1); } } while (0)
 
+/* Retry overflowing ranges before delivering candidates or crediting their count. */
+template <typename Consume>
+static uint64_t search_group_chunks(const group_description &group, int mode,
+                                    int grid_size, int block_size, wide *device_survivors,
+                                    unsigned long long *device_count, unsigned capacity,
+                                    Consume consume) {
+    CUDA_CHECK(cudaMemcpyToSymbol(device_group, &group, sizeof group));
+    uint64_t group_survivors = 0;
+    std::vector<wide> survivors;
+    /* Large groups run in index chunks so the survivor buffer stays bounded. Survivor
+     * counts are quantized by shared leading-bit prefixes, so a chunk can overflow
+     * unexpectedly; an overflowing chunk is split in half and both halves retried. */
+    std::vector<std::pair<uint64_t, uint64_t>> pending;
+    for (uint64_t chunk_begin = 0; chunk_begin < group.count; chunk_begin += CHUNK_SIZE) {
+        uint64_t chunk_end = chunk_begin + CHUNK_SIZE < group.count ? chunk_begin + CHUNK_SIZE : group.count;
+        pending.push_back(std::make_pair(chunk_begin, chunk_end));
+    }
+    while (!pending.empty()) {
+        uint64_t chunk_begin = pending.back().first, chunk_end = pending.back().second;
+        pending.pop_back();
+        CUDA_CHECK(cudaMemset(device_count, 0, sizeof *device_count));
+        search_kernel<<<grid_size, block_size>>>(mode, chunk_begin, chunk_end, device_survivors, device_count, capacity);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        unsigned long long count;
+        CUDA_CHECK(cudaMemcpy(&count, device_count, sizeof count, cudaMemcpyDeviceToHost));
+        if (count > capacity) {
+            if (chunk_end - chunk_begin < 2) {
+                fprintf(stderr, "survivor buffer overflow on a single index in group hex_length=%d leading_bits=%d\n",
+                        group.hex_length, group.leading_bits);
+                exit(1);
+            }
+            uint64_t middle = chunk_begin + (chunk_end - chunk_begin) / 2;
+            fprintf(stderr, "  splitting chunk [%llu, %llu) of hex_length=%d leading_bits=%d: %llu survivors exceed capacity %u\n",
+                    (unsigned long long)chunk_begin, (unsigned long long)chunk_end,
+                    group.hex_length, group.leading_bits, count, capacity);
+            pending.push_back(std::make_pair(middle, chunk_end));
+            pending.push_back(std::make_pair(chunk_begin, middle));
+            continue;
+        }
+        survivors.resize((size_t)count);
+        if (count > 0) CUDA_CHECK(cudaMemcpy(survivors.data(), device_survivors, sizeof(wide) * (size_t)count, cudaMemcpyDeviceToHost));
+        group_survivors += count;
+        consume(chunk_begin, chunk_end, survivors);
+    }
+    return group_survivors;
+}
+
 int main(int argc, char **argv) {
     int mode = MODE_SEARCH;
     int argument_index = 1;
@@ -364,10 +412,9 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     wide *device_survivors;
-    unsigned *device_count;
+    unsigned long long *device_count;
     CUDA_CHECK(cudaMalloc(&device_survivors, sizeof(wide) * (size_t)SURVIVOR_CAPACITY));
-    CUDA_CHECK(cudaMalloc(&device_count, sizeof(unsigned)));
-    std::vector<wide> survivors;
+    CUDA_CHECK(cudaMalloc(&device_count, sizeof *device_count));
 
     uint64_t hits = 0, visited = 0, survivor_total = 0;
     uint64_t short_numbers = 0, mirrored = 0, fall_through = 0;
@@ -375,45 +422,13 @@ int main(int argc, char **argv) {
     auto wall_start = std::chrono::steady_clock::now();
     for (size_t group_index = 0; group_index < groups.size(); group_index++) {
         const group_description &group = groups[group_index];
-        CUDA_CHECK(cudaMemcpyToSymbol(device_group, &group, sizeof group));
-        unsigned group_survivors = 0;
-        /* Large groups run in index chunks so the survivor buffer stays bounded. Survivor
-         * counts are quantized by shared leading-bit prefixes, so a chunk can overflow
-         * unexpectedly; an overflowing chunk is split in half and both halves retried. */
-        std::vector<std::pair<uint64_t, uint64_t>> pending;
-        for (uint64_t chunk_begin = 0; chunk_begin < group.count; chunk_begin += CHUNK_SIZE) {
-            uint64_t chunk_end = chunk_begin + CHUNK_SIZE < group.count ? chunk_begin + CHUNK_SIZE : group.count;
-            pending.push_back(std::make_pair(chunk_begin, chunk_end));
-        }
-        while (!pending.empty()) {
-            uint64_t chunk_begin = pending.back().first, chunk_end = pending.back().second;
-            pending.pop_back();
-            CUDA_CHECK(cudaMemset(device_count, 0, sizeof(unsigned)));
-            search_kernel<<<grid_size, block_size>>>(mode, chunk_begin, chunk_end, device_survivors, device_count, SURVIVOR_CAPACITY);
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-            unsigned count;
-            CUDA_CHECK(cudaMemcpy(&count, device_count, sizeof count, cudaMemcpyDeviceToHost));
-            if (count > SURVIVOR_CAPACITY) {
-                if (chunk_end - chunk_begin < 2) {
-                    fprintf(stderr, "survivor buffer overflow on a single index in group hex_length=%d leading_bits=%d\n",
-                            group.hex_length, group.leading_bits);
-                    return 1;
-                }
-                uint64_t middle = chunk_begin + (chunk_end - chunk_begin) / 2;
-                fprintf(stderr, "  splitting chunk [%llu, %llu) of hex_length=%d leading_bits=%d: %u survivors exceed capacity %u\n",
-                        (unsigned long long)chunk_begin, (unsigned long long)chunk_end, group.hex_length, group.leading_bits, count, SURVIVOR_CAPACITY);
-                pending.push_back(std::make_pair(middle, chunk_end));
-                pending.push_back(std::make_pair(chunk_begin, middle));
-                continue;
-            }
-            survivors.resize(count);
-            if (count > 0) CUDA_CHECK(cudaMemcpy(survivors.data(), device_survivors, sizeof(wide) * count, cudaMemcpyDeviceToHost));
+        uint64_t group_survivors = search_group_chunks(group, mode, grid_size, block_size,
+                device_survivors, device_count, SURVIVOR_CAPACITY,
+                [&](uint64_t chunk_begin, uint64_t chunk_end, const std::vector<wide> &survivors) {
             visited += chunk_end - chunk_begin;
-            survivor_total += count;
-            group_survivors += count;
+            survivor_total += survivors.size();
 
-            for (unsigned index = 0; index < count; index++) {
+            for (size_t index = 0; index < survivors.size(); index++) {
                 const wide &value = survivors[index];
                 if (mode == MODE_ALL) { print_value(value); continue; }
                 int width = (mode == MODE_STAGE1) ? 3 : 9;
@@ -426,11 +441,12 @@ int main(int argc, char **argv) {
                 }
                 if (mode == MODE_SEARCH && is_palindrome_base10(value)) { hits++; print_value(value); fflush(stdout); }
             }
-        }
+        });
         if (mode == MODE_SEARCH) {
             double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
-            fprintf(stderr, "  finished hex_length=%d leading_bits=%d (%llu candidates, %u survivors, %.1f s elapsed)\n",
-                    group.hex_length, group.leading_bits, (unsigned long long)group.count, group_survivors, elapsed);
+            fprintf(stderr, "  finished hex_length=%d leading_bits=%d (%llu candidates, %llu survivors, %.1f s elapsed)\n",
+                    group.hex_length, group.leading_bits, (unsigned long long)group.count,
+                    (unsigned long long)group_survivors, elapsed);
         }
     }
     double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
